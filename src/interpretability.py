@@ -9,7 +9,7 @@ import pandas as pd
 import shap
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 if TYPE_CHECKING:
     from src.models import ModelResult
@@ -107,7 +107,7 @@ def explain_prediction(
     non-tree models that lack a TreeExplainer.
     """
     model = model_result.pipeline.named_steps["model"]
-    if not isinstance(model, RandomForestRegressor):
+    if not isinstance(model, (RandomForestRegressor, GradientBoostingRegressor)):
         return None
 
     scaler = model_result.pipeline.named_steps["scaler"]

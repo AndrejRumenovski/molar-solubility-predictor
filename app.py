@@ -146,7 +146,21 @@ def parity_plot(model_result, smiles_test: pd.Series):
             line=dict(color="crimson", dash="dash"),
         )
     )
-    fig.update_layout(height=450)
+    fig.update_layout(height=420)
+    return fig
+
+
+def residuals_figure(model_result):
+    residuals = model_result.y_test - model_result.y_pred
+    fig = px.histogram(
+        pd.DataFrame({"Residual (actual − predicted)": residuals}),
+        x="Residual (actual − predicted)",
+        nbins=30,
+        title="Residual Distribution",
+        color_discrete_sequence=["#2d6a9f"],
+    )
+    fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="crimson")
+    fig.update_layout(height=420, margin=dict(l=0, r=0, t=40, b=0))
     return fig
 
 
@@ -177,6 +191,33 @@ def shap_contribution_figure(contributions: pd.DataFrame):
     return fig
 
 
+def run_batch_predictions(smiles_series: pd.Series, model_result) -> pd.DataFrame:
+    """Featurize and predict LogS for each SMILES in the series."""
+    rows = []
+    for smi in smiles_series:
+        smi = str(smi).strip()
+        desc = smiles_to_descriptors(smi)
+        if desc is None:
+            rows.append({
+                "SMILES": smi,
+                "Valid": False,
+                "Predicted LogS": None,
+                "Interpretation": "Invalid / unparseable SMILES",
+                **{k: None for k in FEATURE_COLUMNS},
+            })
+        else:
+            feat = pd.DataFrame([desc])
+            pred = float(model_result.pipeline.predict(feat)[0])
+            rows.append({
+                "SMILES": smi,
+                "Valid": True,
+                "Predicted LogS": round(pred, 3),
+                "Interpretation": interpret_logs(pred),
+                **{k: round(v, 4) for k, v in desc.items()},
+            })
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     st.title("🧪 Molar Solubility Predictor")
     st.caption(
@@ -186,6 +227,7 @@ def main() -> None:
     bundle = get_training_bundle()
     rf_result = get_model_by_name(bundle.results, RANDOM_FOREST)
     metrics_df = metrics_dataframe(bundle.results)
+    model_names = [r.name for r in bundle.results]
 
     # --- Sidebar ---
     with st.sidebar:
@@ -198,23 +240,32 @@ def main() -> None:
         st.subheader("Feature Importance")
         fi_fig = feature_importance_figure(rf_result, bundle.feature_columns)
         if fi_fig:
-            st.plotly_chart(fi_fig, use_container_width=True)
+            st.plotly_chart(fi_fig)
 
-    # --- Main content ---
-    tab_predict, tab_dashboard = st.tabs(["Live Inference", "Performance Dashboard"])
+    # --- Tabs ---
+    tab_predict, tab_batch, tab_dashboard = st.tabs(
+        ["Live Inference", "Batch Prediction", "Performance Dashboard"]
+    )
 
+    # ── Live Inference ──────────────────────────────────────────────────────
     with tab_predict:
         st.subheader("Live Inference Playground")
         st.markdown(
             "Enter a SMILES string to draw the molecule and predict its aqueous solubility (LogS)."
         )
 
-        default_smiles = "CC(=O)Oc1ccccc1C(=O)O"
-        user_smiles = st.text_input(
-            "SMILES string",
-            value=default_smiles,
-            placeholder="e.g. CC(=O)Oc1ccccc1C(=O)O (Aspirin)",
-        ).strip()
+        col_input, col_model_sel = st.columns([3, 1])
+        with col_input:
+            default_smiles = "CC(=O)Oc1ccccc1C(=O)O"
+            user_smiles = st.text_input(
+                "SMILES string",
+                value=default_smiles,
+                placeholder="e.g. CC(=O)Oc1ccccc1C(=O)O (Aspirin)",
+            ).strip()
+        with col_model_sel:
+            active_model_name = st.selectbox("Model", model_names, key="live_model")
+
+        active_model = get_model_by_name(bundle.results, active_model_name)
 
         if user_smiles:
             mol = Chem.MolFromSmiles(user_smiles)
@@ -226,9 +277,9 @@ def main() -> None:
                     st.error("Could not compute descriptors for this molecule.")
                 else:
                     feature_row = pd.DataFrame([descriptors])
-                    predicted_logs = rf_result.pipeline.predict(feature_row)[0]
+                    predicted_logs = active_model.pipeline.predict(feature_row)[0]
                     interpretation = interpret_logs(predicted_logs)
-                    halfwidth = prediction_interval_halfwidth(rf_result)
+                    halfwidth = prediction_interval_halfwidth(active_model)
 
                     col_mol, col_pred = st.columns([1, 1])
 
@@ -253,21 +304,23 @@ def main() -> None:
                         desc_df = pd.DataFrame(
                             [{"Descriptor": k, "Value": round(v, 4)} for k, v in descriptors.items()]
                         )
-                        st.dataframe(desc_df, hide_index=True, use_container_width=True)
+                        st.dataframe(desc_df, hide_index=True)
 
                     st.divider()
                     col_shap, col_similar = st.columns([1, 1])
 
                     with col_shap:
-                        contributions = explain_prediction(rf_result, feature_row)
+                        contributions = explain_prediction(active_model, feature_row)
                         if contributions is not None:
-                            st.plotly_chart(
-                                shap_contribution_figure(contributions),
-                                use_container_width=True,
-                            )
+                            st.plotly_chart(shap_contribution_figure(contributions))
                             st.caption(
                                 "Bars show how each descriptor pushed this prediction above "
                                 "or below the dataset's average LogS."
+                            )
+                        else:
+                            st.info(
+                                "SHAP explanations are available for Random Forest and "
+                                "Gradient Boosting models only."
                             )
 
                     with col_similar:
@@ -289,23 +342,74 @@ def main() -> None:
                             display = similar.copy()
                             display["Similarity"] = display["Similarity"].round(3)
                             display["Experimental LogS"] = display["Experimental LogS"].round(3)
-                            st.dataframe(display, hide_index=True, use_container_width=True)
+                            st.dataframe(display, hide_index=True)
 
+    # ── Batch Prediction ────────────────────────────────────────────────────
+    with tab_batch:
+        st.subheader("Batch Prediction")
+        st.markdown(
+            "Upload a CSV containing SMILES strings to predict aqueous solubility for multiple "
+            "compounds at once and download the results."
+        )
+
+        col_upload, col_batch_opts = st.columns([2, 1])
+        with col_upload:
+            uploaded = st.file_uploader("Upload CSV", type=["csv"])
+        with col_batch_opts:
+            batch_model_name = st.selectbox("Model", model_names, key="batch_model")
+
+        if uploaded is not None:
+            batch_input = pd.read_csv(uploaded)
+            st.caption(f"Loaded {len(batch_input):,} rows · {len(batch_input.columns)} columns.")
+
+            candidates = [c for c in batch_input.columns if "smiles" in c.lower()]
+            default_idx = batch_input.columns.tolist().index(candidates[0]) if candidates else 0
+            smiles_col = st.selectbox(
+                "SMILES column",
+                batch_input.columns.tolist(),
+                index=default_idx,
+            )
+
+            st.markdown("**Preview (first 5 rows)**")
+            st.dataframe(batch_input[[smiles_col]].head(5), hide_index=True)
+
+            if st.button("Run Predictions", type="primary"):
+                batch_model = get_model_by_name(bundle.results, batch_model_name)
+                with st.spinner(f"Predicting {len(batch_input):,} compounds…"):
+                    result_df = run_batch_predictions(batch_input[smiles_col], batch_model)
+
+                valid_n = int(result_df["Valid"].sum())
+                st.success(
+                    f"Done — {valid_n:,} / {len(result_df):,} compounds predicted successfully."
+                )
+                st.dataframe(result_df, hide_index=True)
+
+                st.download_button(
+                    "⬇ Download predictions as CSV",
+                    result_df.to_csv(index=False).encode(),
+                    file_name="solubility_predictions.csv",
+                    mime="text/csv",
+                )
+
+    # ── Performance Dashboard ───────────────────────────────────────────────
     with tab_dashboard:
         st.subheader("Model Comparison")
-        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+        st.dataframe(metrics_df, hide_index=True)
 
-        st.subheader("Parity Plot")
-        selected_model = st.selectbox(
-            "Select model for parity plot",
-            [r.name for r in bundle.results],
+        st.subheader("Diagnostics")
+        dash_model_name = st.selectbox(
+            "Select model",
+            model_names,
             index=0,
+            key="dashboard_model",
         )
-        selected_result = get_model_by_name(bundle.results, selected_model)
-        st.plotly_chart(
-            parity_plot(selected_result, bundle.smiles_test),
-            use_container_width=True,
-        )
+        selected_result = get_model_by_name(bundle.results, dash_model_name)
+
+        col_parity, col_resid = st.columns([1, 1])
+        with col_parity:
+            st.plotly_chart(parity_plot(selected_result, bundle.smiles_test))
+        with col_resid:
+            st.plotly_chart(residuals_figure(selected_result))
 
     # --- How It Works ---
     st.markdown(
