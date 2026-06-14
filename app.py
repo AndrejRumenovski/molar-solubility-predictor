@@ -11,6 +11,11 @@ from rdkit.Chem import Draw
 
 from src.data_loader import TARGET_COL, load_dataset
 from src.featurizer import FEATURE_COLUMNS, featurize_dataframe, interpret_logs, smiles_to_descriptors
+from src.interpretability import (
+    explain_prediction,
+    find_similar_compounds,
+    prediction_interval_halfwidth,
+)
 from src.models import get_model_by_name, metrics_dataframe, train_models
 
 RANDOM_FOREST = "Random Forest"
@@ -27,20 +32,22 @@ CUSTOM_CSS = """
         background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 100%);
         border-radius: 12px;
         padding: 1.2rem 1.5rem;
-        color: white;
+        color: #ffffff;
         box-shadow: 0 4px 15px rgba(0,0,0,0.15);
         margin-bottom: 0.5rem;
     }
     .metric-card h3 {
         margin: 0;
         font-size: 0.85rem;
-        opacity: 0.85;
+        opacity: 0.9;
         font-weight: 400;
+        color: #ffffff;
     }
     .metric-card p {
         margin: 0.3rem 0 0 0;
         font-size: 1.6rem;
         font-weight: 700;
+        color: #ffffff;
     }
     .prediction-box {
         background: #f0f7ff;
@@ -48,6 +55,7 @@ CUSTOM_CSS = """
         border-radius: 8px;
         padding: 1rem 1.2rem;
         margin-top: 1rem;
+        color: #1a1a1a;
     }
     .how-it-works {
         background: #fafafa;
@@ -55,6 +63,7 @@ CUSTOM_CSS = """
         padding: 1.5rem 2rem;
         margin-top: 2rem;
         border: 1px solid #e0e0e0;
+        color: #333333;
     }
 </style>
 """
@@ -141,6 +150,33 @@ def parity_plot(model_result, smiles_test: pd.Series):
     return fig
 
 
+def shap_contribution_figure(contributions: pd.DataFrame):
+    plot_df = contributions.sort_values("Contribution")
+    plot_df["Direction"] = plot_df["Contribution"].apply(
+        lambda c: "Increases LogS" if c >= 0 else "Decreases LogS"
+    )
+
+    fig = px.bar(
+        plot_df,
+        x="Contribution",
+        y="Feature",
+        orientation="h",
+        color="Direction",
+        color_discrete_map={
+            "Increases LogS": "#2d6a9f",
+            "Decreases LogS": "#c0504d",
+        },
+        title="Feature Contributions to This Prediction (SHAP)",
+    )
+    fig.add_vline(x=0, line_width=1, line_color="#888888")
+    fig.update_layout(
+        height=320,
+        margin=dict(l=0, r=0, t=40, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
+    )
+    return fig
+
+
 def main() -> None:
     st.title("🧪 Molar Solubility Predictor")
     st.caption(
@@ -185,25 +221,28 @@ def main() -> None:
             if mol is None:
                 st.error("Invalid SMILES string. Please check your input and try again.")
             else:
-                col_mol, col_pred = st.columns([1, 1])
+                descriptors = smiles_to_descriptors(user_smiles)
+                if descriptors is None:
+                    st.error("Could not compute descriptors for this molecule.")
+                else:
+                    feature_row = pd.DataFrame([descriptors])
+                    predicted_logs = rf_result.pipeline.predict(feature_row)[0]
+                    interpretation = interpret_logs(predicted_logs)
+                    halfwidth = prediction_interval_halfwidth(rf_result)
 
-                with col_mol:
-                    img = Draw.MolToImage(mol, size=(400, 300))
-                    st.image(img, caption=f"2D structure: `{user_smiles}`")
+                    col_mol, col_pred = st.columns([1, 1])
 
-                with col_pred:
-                    descriptors = smiles_to_descriptors(user_smiles)
-                    if descriptors is None:
-                        st.error("Could not compute descriptors for this molecule.")
-                    else:
-                        feature_row = pd.DataFrame([descriptors])
-                        predicted_logs = rf_result.pipeline.predict(feature_row)[0]
-                        interpretation = interpret_logs(predicted_logs)
+                    with col_mol:
+                        img = Draw.MolToImage(mol, size=(400, 300))
+                        st.image(img, caption=f"2D structure: `{user_smiles}`")
 
+                    with col_pred:
                         st.markdown(
                             f"""
                             <div class="prediction-box">
-                                <strong>Predicted LogS:</strong> {predicted_logs:.3f}<br>
+                                <strong>Predicted LogS:</strong> {predicted_logs:.3f}
+                                &plusmn; {halfwidth:.3f}
+                                <span style="opacity:0.7;">(95% interval)</span><br>
                                 <strong>Interpretation:</strong> {interpretation}
                             </div>
                             """,
@@ -215,6 +254,42 @@ def main() -> None:
                             [{"Descriptor": k, "Value": round(v, 4)} for k, v in descriptors.items()]
                         )
                         st.dataframe(desc_df, hide_index=True, use_container_width=True)
+
+                    st.divider()
+                    col_shap, col_similar = st.columns([1, 1])
+
+                    with col_shap:
+                        contributions = explain_prediction(rf_result, feature_row)
+                        if contributions is not None:
+                            st.plotly_chart(
+                                shap_contribution_figure(contributions),
+                                use_container_width=True,
+                            )
+                            st.caption(
+                                "Bars show how each descriptor pushed this prediction above "
+                                "or below the dataset's average LogS."
+                            )
+
+                    with col_similar:
+                        st.markdown("**Most Similar Training Compounds**")
+                        st.caption("Nearest neighbours by Morgan-fingerprint Tanimoto similarity.")
+                        similar = find_similar_compounds(
+                            user_smiles,
+                            bundle.smiles_train,
+                            bundle.y_train,
+                            n_neighbors=5,
+                        )
+                        if similar.empty:
+                            st.info(
+                                "No training compounds exceed the similarity threshold — "
+                                "this molecule lies outside the model's familiar chemical space, "
+                                "so treat the prediction with extra caution."
+                            )
+                        else:
+                            display = similar.copy()
+                            display["Similarity"] = display["Similarity"].round(3)
+                            display["Experimental LogS"] = display["Experimental LogS"].round(3)
+                            st.dataframe(display, hide_index=True, use_container_width=True)
 
     with tab_dashboard:
         st.subheader("Model Comparison")

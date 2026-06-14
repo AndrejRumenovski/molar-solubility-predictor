@@ -9,6 +9,7 @@ End-to-end **QSPR (Quantitative Structure-Property Relationship)** pipeline that
 - Trains Random Forest, Gradient Boosting, and Ridge regression models
 - Interactive Streamlit dashboard with live SMILES inference and 2D structure rendering
 - Plotly parity plots, feature importance charts, and model comparison metrics
+- Per-prediction interpretability: SHAP feature contributions, 95% prediction intervals, and nearest training compounds by Tanimoto similarity
 
 ## Quick Start
 
@@ -35,7 +36,8 @@ molar-solubility-predictor/
 └── src/
     ├── data_loader.py      # Dataset download & caching
     ├── featurizer.py       # RDKit descriptor extraction
-    └── models.py           # ML training & evaluation
+    ├── models.py           # ML training & evaluation
+    └── interpretability.py # SHAP, prediction intervals, similarity search
 ```
 
 ## Standalone Scripts

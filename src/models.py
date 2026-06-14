@@ -49,6 +49,7 @@ class TrainingBundle:
     X_test: pd.DataFrame
     y_train: pd.Series
     y_test: pd.Series
+    smiles_train: pd.Series
     smiles_test: pd.Series
     results: list[ModelResult]
     feature_columns: list[str]
@@ -107,6 +108,7 @@ def train_models(
         X_test=X_test.reset_index(drop=True),
         y_train=y_train.reset_index(drop=True),
         y_test=y_test.reset_index(drop=True),
+        smiles_train=smiles_train.reset_index(drop=True),
         smiles_test=smiles_test.reset_index(drop=True),
         results=results,
         feature_columns=features,
