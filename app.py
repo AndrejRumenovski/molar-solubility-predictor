@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+from io import BytesIO
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -20,56 +23,306 @@ from src.models import get_model_by_name, metrics_dataframe, train_models
 
 RANDOM_FOREST = "Random Forest"
 
+# ── Palette (kept in sync with .streamlit/config.toml) ───────────────────────
+C_ACCENT   = "#00e5c0"
+C_POSITIVE = "#3fb950"
+C_WARNING  = "#d29922"
+C_NEGATIVE = "#f85149"
+C_BG       = "#07090f"
+C_SURFACE  = "#111827"
+C_SURFACE2 = "#1c2333"
+C_BORDER   = "#1e293b"
+C_TEXT     = "#c9d1d9"
+C_MUTED    = "#6e7681"
+
 st.set_page_config(
     page_title="Molar Solubility Predictor",
     page_icon="🧪",
     layout="wide",
 )
 
-CUSTOM_CSS = """
+# ── Hex-ring SVG texture (benzene motif) used in the prediction card ─────────
+_HEX_SVG = (
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'"
+    " width='56' height='100'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28"
+    " 66zm0-6l22-12.7V22.7L28 10 6 22.7v24.6L28 60z' fill='%23ffffff'"
+    " fill-rule='evenodd'/%3E%3C/svg%3E\")"
+)
+
+CUSTOM_CSS = f"""
 <style>
-    .metric-card {
-        background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 100%);
-        border-radius: 12px;
-        padding: 1.2rem 1.5rem;
-        color: #ffffff;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        margin-bottom: 0.5rem;
-    }
-    .metric-card h3 {
-        margin: 0;
-        font-size: 0.85rem;
-        opacity: 0.9;
-        font-weight: 400;
-        color: #ffffff;
-    }
-    .metric-card p {
-        margin: 0.3rem 0 0 0;
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #ffffff;
-    }
-    .prediction-box {
-        background: #f0f7ff;
-        border-left: 4px solid #2d6a9f;
-        border-radius: 8px;
-        padding: 1rem 1.2rem;
-        margin-top: 1rem;
-        color: #1a1a1a;
-    }
-    .how-it-works {
-        background: #fafafa;
-        border-radius: 10px;
-        padding: 1.5rem 2rem;
-        margin-top: 2rem;
-        border: 1px solid #e0e0e0;
-        color: #333333;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {{
+    --accent:   {C_ACCENT};
+    --dim:      rgba(0,229,192,0.10);
+    --positive: {C_POSITIVE};
+    --warning:  {C_WARNING};
+    --negative: {C_NEGATIVE};
+    --bg:       {C_BG};
+    --surface:  {C_SURFACE};
+    --surface2: {C_SURFACE2};
+    --border:   {C_BORDER};
+    --text:     {C_TEXT};
+    --muted:    {C_MUTED};
+}}
+
+/* ── Global ────────────────────────────────────────────────────────────── */
+html, body, .stApp {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    background-color: var(--bg) !important;
+}}
+h1, h2, h3, h4 {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    letter-spacing: -0.025em !important;
+}}
+p, label, div, span, li, td, th {{
+    font-family: 'Space Grotesk', sans-serif !important;
+}}
+
+/* ── Chrome ────────────────────────────────────────────────────────────── */
+#MainMenu, footer {{ visibility: hidden !important; }}
+[data-testid="stHeader"] {{
+    background: var(--bg) !important;
+    border-bottom: 1px solid var(--border) !important;
+}}
+[data-testid="stDecoration"] {{ display: none !important; }}
+[data-testid="stMainBlockContainer"] {{ background-color: var(--bg) !important; }}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {{
+    background-color: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+}}
+[data-testid="stSidebarContent"] {{ padding-top: 1.5rem !important; }}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
+[data-baseweb="tab-list"] {{
+    background: transparent !important;
+    border-bottom: 1px solid var(--border) !important;
+    gap: 0 !important;
+}}
+button[data-baseweb="tab"] {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 0.875rem !important;
+    color: var(--muted) !important;
+    padding: 0.75rem 1.5rem !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    border-bottom: 2px solid transparent !important;
+    transition: color 0.2s !important;
+}}
+button[aria-selected="true"][data-baseweb="tab"] {{
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent) !important;
+    background: transparent !important;
+}}
+[data-baseweb="tab-highlight"],
+[data-baseweb="tab-border"] {{ display: none !important; }}
+
+/* ── Text input (SMILES string) ────────────────────────────────────────── */
+[data-testid="stTextInput"] input {{
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.875rem !important;
+    background-color: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}}
+[data-testid="stTextInput"] input:focus {{
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--dim) !important;
+}}
+
+/* ── Selectbox ─────────────────────────────────────────────────────────── */
+[data-baseweb="select"] > div:first-child {{
+    background-color: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+}}
+
+/* ── Primary button ────────────────────────────────────────────────────── */
+button[kind="primary"] {{
+    background-color: var(--accent) !important;
+    color: {C_BG} !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em !important;
+    border: none !important;
+    transition: opacity 0.2s !important;
+}}
+button[kind="primary"]:hover {{ opacity: 0.85 !important; }}
+
+/* ── File uploader ─────────────────────────────────────────────────────── */
+[data-testid="stFileUploader"] {{
+    border: 1px dashed var(--border) !important;
+    border-radius: 8px !important;
+    background: var(--surface2) !important;
+}}
+
+/* ── Divider ───────────────────────────────────────────────────────────── */
+hr {{ border-color: var(--border) !important; }}
+
+/* ── Model card (sidebar) ──────────────────────────────────────────────── */
+.model-card {{
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.8rem 0.9rem;
+    margin-bottom: 0.5rem;
+}}
+.model-card-name {{
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0 0 0.55rem;
+    display: block;
+}}
+.model-card-row {{ display: flex; gap: 1.5rem; }}
+.model-metric {{ display: flex; flex-direction: column; }}
+.model-metric-label {{
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 0.1rem;
+}}
+.model-metric-value {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--accent);
+    line-height: 1;
+}}
+
+/* ── Section labels ────────────────────────────────────────────────────── */
+.eyebrow {{
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 0.35rem;
+}}
+.sub-caption {{
+    font-size: 0.78rem;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 0.6rem;
+    line-height: 1.45;
+}}
+
+/* ── Prediction box  ── the signature element ──────────────────────────── */
+@keyframes phosphor-pulse {{
+    0%, 100% {{ box-shadow: 0 0 0 0   var(--pred-glow), 0 0 16px var(--pred-glow); }}
+    50%       {{ box-shadow: 0 0 0 3px var(--pred-glow), 0 0 32px var(--pred-glow); }}
+}}
+@media (prefers-reduced-motion: reduce) {{
+    .pred-box {{ animation: none !important; }}
+}}
+
+.pred-box {{
+    border-radius: 10px;
+    padding: 1.5rem 1.75rem;
+    margin-top: 0.75rem;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--pred-border, var(--accent));
+    background: var(--pred-bg, rgba(0,229,192,0.04));
+    animation: phosphor-pulse 4s ease-in-out infinite;
+}}
+.pred-box::before {{
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: {_HEX_SVG};
+    background-size: 56px 100px;
+    opacity: 0.035;
+    pointer-events: none;
+}}
+.pred-eyebrow {{
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 0.3rem;
+}}
+.pred-value {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.8rem;
+    font-weight: 500;
+    line-height: 1;
+    display: block;
+    color: var(--pred-color, var(--accent));
+}}
+.pred-interval {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    display: block;
+    margin-top: 0.2rem;
+}}
+.pred-hr {{
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 0.9rem 0;
+}}
+.pred-interp {{ font-size: 0.875rem; color: var(--muted); line-height: 1.55; }}
+.pred-interp strong {{ color: var(--text); font-weight: 500; }}
+
+/* ── How It Works ──────────────────────────────────────────────────────── */
+.hiw {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 2rem 2.5rem;
+    margin-top: 2.5rem;
+}}
+.hiw-eyebrow {{
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 0.5rem;
+}}
+.hiw h3 {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 1.15rem !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.02em !important;
+    color: var(--text) !important;
+    margin: 0 0 1.25rem !important;
+}}
+.hiw p {{
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+}}
+.hiw strong {{ color: var(--text); font-weight: 500; }}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# ── Plotly base layout ────────────────────────────────────────────────────────
+_CHART = dict(
+    template="plotly_dark",
+    plot_bgcolor="rgba(17,24,39,0.5)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Space Grotesk, sans-serif", color=C_MUTED, size=11),
+    margin=dict(l=0, r=0, t=40, b=0),
+)
 
+
+# ── Cached data / training ────────────────────────────────────────────────────
 @st.cache_data(show_spinner="Loading Delaney ESOL dataset…")
 def load_and_featurize() -> pd.DataFrame:
     raw = load_dataset()
@@ -82,17 +335,46 @@ def get_training_bundle():
     return train_models(df)
 
 
-def render_metric_card(label: str, value: str) -> None:
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _logs_style(logs: float) -> tuple[str, str, str, str]:
+    """(border, background, text_color, glow_rgba) keyed to solubility class."""
+    if logs > 0:
+        return C_POSITIVE, "rgba(63,185,80,0.06)",  C_POSITIVE, "rgba(63,185,80,0.10)"
+    if logs > -4:
+        return C_WARNING,  "rgba(210,153,34,0.06)", C_WARNING,  "rgba(210,153,34,0.10)"
+    return     C_NEGATIVE, "rgba(248,81,73,0.06)",  C_NEGATIVE, "rgba(248,81,73,0.10)"
+
+
+def _pil_to_b64(img) -> str:
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def render_model_card(model_result) -> None:
     st.markdown(
-        f'<div class="metric-card"><h3>{label}</h3><p>{value}</p></div>',
+        f"""
+        <div class="model-card">
+            <span class="model-card-name">{model_result.name}</span>
+            <div class="model-card-row">
+                <div class="model-metric">
+                    <span class="model-metric-label">R²</span>
+                    <span class="model-metric-value">{model_result.r2:.4f}</span>
+                </div>
+                <div class="model-metric">
+                    <span class="model-metric-label">MAE</span>
+                    <span class="model-metric-value">{model_result.mae:.4f}</span>
+                </div>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
 
+# ── Chart builders ────────────────────────────────────────────────────────────
 def feature_importance_figure(model_result, feature_columns: list[str]):
-    pipeline = model_result.pipeline
-    model = pipeline.named_steps["model"]
-
+    model = model_result.pipeline.named_steps["model"]
     if hasattr(model, "feature_importances_"):
         importances = model.feature_importances_
     elif hasattr(model, "coef_"):
@@ -100,53 +382,43 @@ def feature_importance_figure(model_result, feature_columns: list[str]):
     else:
         return None
 
-    importance_df = pd.DataFrame(
+    df = pd.DataFrame(
         {"Feature": feature_columns, "Importance": importances}
     ).sort_values("Importance", ascending=True)
 
     fig = px.bar(
-        importance_df,
-        x="Importance",
-        y="Feature",
-        orientation="h",
+        df, x="Importance", y="Feature", orientation="h",
         title="Feature Importance",
         color="Importance",
-        color_continuous_scale="Blues",
+        color_continuous_scale=[[0, C_SURFACE2], [1, C_ACCENT]],
     )
-    fig.update_layout(showlegend=False, height=320, margin=dict(l=0, r=0, t=40, b=0))
+    fig.update_layout(**_CHART, showlegend=False, height=320, coloraxis_showscale=False)
+    fig.update_traces(marker_line_width=0)
     return fig
 
 
 def parity_plot(model_result, smiles_test: pd.Series):
-    plot_df = pd.DataFrame(
-        {
-            "Experimental LogS": model_result.y_test,
-            "Predicted LogS": model_result.y_pred,
-            "SMILES": smiles_test.values,
-        }
-    )
+    plot_df = pd.DataFrame({
+        "Experimental LogS": model_result.y_test,
+        "Predicted LogS":    model_result.y_pred,
+        "SMILES":            smiles_test.values,
+    })
 
     fig = px.scatter(
         plot_df,
-        x="Experimental LogS",
-        y="Predicted LogS",
+        x="Experimental LogS", y="Predicted LogS",
         hover_data={"SMILES": True, "Experimental LogS": ":.3f", "Predicted LogS": ":.3f"},
         title="Parity Plot — Predicted vs. Experimental LogS",
-        opacity=0.7,
+        opacity=0.65,
+        color_discrete_sequence=[C_ACCENT],
     )
-
     lo = min(plot_df["Experimental LogS"].min(), plot_df["Predicted LogS"].min()) - 0.5
     hi = max(plot_df["Experimental LogS"].max(), plot_df["Predicted LogS"].max()) + 0.5
-    fig.add_trace(
-        go.Scatter(
-            x=[lo, hi],
-            y=[lo, hi],
-            mode="lines",
-            name="y = x",
-            line=dict(color="crimson", dash="dash"),
-        )
-    )
-    fig.update_layout(height=420)
+    fig.add_trace(go.Scatter(
+        x=[lo, hi], y=[lo, hi], mode="lines", name="y = x",
+        line=dict(color=C_NEGATIVE, dash="dash", width=1),
+    ))
+    fig.update_layout(**_CHART, height=420)
     return fig
 
 
@@ -155,52 +427,43 @@ def residuals_figure(model_result):
     fig = px.histogram(
         pd.DataFrame({"Residual (actual − predicted)": residuals}),
         x="Residual (actual − predicted)",
-        nbins=30,
-        title="Residual Distribution",
-        color_discrete_sequence=["#2d6a9f"],
+        nbins=30, title="Residual Distribution",
+        color_discrete_sequence=[C_ACCENT],
     )
-    fig.add_vline(x=0, line_width=2, line_dash="dash", line_color="crimson")
-    fig.update_layout(height=420, margin=dict(l=0, r=0, t=40, b=0))
+    fig.add_vline(x=0, line_width=1.5, line_dash="dash", line_color=C_NEGATIVE)
+    fig.update_layout(**_CHART, height=420)
+    fig.update_traces(marker_line_width=0, opacity=0.8)
     return fig
 
 
 def shap_contribution_figure(contributions: pd.DataFrame):
-    plot_df = contributions.sort_values("Contribution")
+    plot_df = contributions.sort_values("Contribution").copy()
     plot_df["Direction"] = plot_df["Contribution"].apply(
         lambda c: "Increases LogS" if c >= 0 else "Decreases LogS"
     )
-
     fig = px.bar(
-        plot_df,
-        x="Contribution",
-        y="Feature",
-        orientation="h",
+        plot_df, x="Contribution", y="Feature", orientation="h",
         color="Direction",
-        color_discrete_map={
-            "Increases LogS": "#2d6a9f",
-            "Decreases LogS": "#c0504d",
-        },
-        title="Feature Contributions to This Prediction (SHAP)",
+        color_discrete_map={"Increases LogS": C_POSITIVE, "Decreases LogS": C_NEGATIVE},
+        title="Feature Contributions (SHAP)",
     )
-    fig.add_vline(x=0, line_width=1, line_color="#888888")
+    fig.add_vline(x=0, line_width=1, line_color=C_BORDER)
     fig.update_layout(
-        height=320,
-        margin=dict(l=0, r=0, t=40, b=0),
+        **_CHART, height=310,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=""),
     )
+    fig.update_traces(marker_line_width=0)
     return fig
 
 
 def run_batch_predictions(smiles_series: pd.Series, model_result) -> pd.DataFrame:
-    """Featurize and predict LogS for each SMILES in the series."""
     rows = []
     for smi in smiles_series:
         smi = str(smi).strip()
         desc = smiles_to_descriptors(smi)
         if desc is None:
             rows.append({
-                "SMILES": smi,
-                "Valid": False,
+                "SMILES": smi, "Valid": False,
                 "Predicted LogS": None,
                 "Interpretation": "Invalid / unparseable SMILES",
                 **{k: None for k in FEATURE_COLUMNS},
@@ -209,8 +472,7 @@ def run_batch_predictions(smiles_series: pd.Series, model_result) -> pd.DataFram
             feat = pd.DataFrame([desc])
             pred = float(model_result.pipeline.predict(feat)[0])
             rows.append({
-                "SMILES": smi,
-                "Valid": True,
+                "SMILES": smi, "Valid": True,
                 "Predicted LogS": round(pred, 3),
                 "Interpretation": interpret_logs(pred),
                 **{k: round(v, 4) for k, v in desc.items()},
@@ -218,48 +480,51 @@ def run_batch_predictions(smiles_series: pd.Series, model_result) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
+# ── App ───────────────────────────────────────────────────────────────────────
 def main() -> None:
     st.title("🧪 Molar Solubility Predictor")
     st.caption(
-        "QSPR pipeline for aqueous solubility (LogS) prediction using the Delaney ESOL dataset"
+        "QSPR pipeline · Delaney ESOL dataset · "
+        "Random Forest / Gradient Boosting / Ridge"
     )
 
-    bundle = get_training_bundle()
-    rf_result = get_model_by_name(bundle.results, RANDOM_FOREST)
-    metrics_df = metrics_dataframe(bundle.results)
+    bundle      = get_training_bundle()
+    rf_result   = get_model_by_name(bundle.results, RANDOM_FOREST)
+    metrics_df  = metrics_dataframe(bundle.results)
     model_names = [r.name for r in bundle.results]
 
-    # --- Sidebar ---
+    # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.header("Model Performance")
-        for _, row in metrics_df.iterrows():
-            render_metric_card(f"{row['Model']} — R²", f"{row['R²']:.4f}")
-            render_metric_card(f"{row['Model']} — MAE", f"{row['MAE']:.4f} log units")
+        st.markdown(
+            '<span class="eyebrow" style="color:var(--accent);">Model Performance</span>',
+            unsafe_allow_html=True,
+        )
+        for mr in bundle.results:
+            render_model_card(mr)
 
         st.divider()
-        st.subheader("Feature Importance")
+        st.markdown('<span class="eyebrow">Feature Importance</span>', unsafe_allow_html=True)
         fi_fig = feature_importance_figure(rf_result, bundle.feature_columns)
         if fi_fig:
             st.plotly_chart(fi_fig)
 
-    # --- Tabs ---
+    # ── Tabs ──────────────────────────────────────────────────────────────────
     tab_predict, tab_batch, tab_dashboard = st.tabs(
         ["Live Inference", "Batch Prediction", "Performance Dashboard"]
     )
 
-    # ── Live Inference ──────────────────────────────────────────────────────
+    # ── Live Inference ────────────────────────────────────────────────────────
     with tab_predict:
         st.subheader("Live Inference Playground")
         st.markdown(
-            "Enter a SMILES string to draw the molecule and predict its aqueous solubility (LogS)."
+            "Enter a SMILES string to draw the molecule and predict its aqueous solubility."
         )
 
         col_input, col_model_sel = st.columns([3, 1])
         with col_input:
-            default_smiles = "CC(=O)Oc1ccccc1C(=O)O"
             user_smiles = st.text_input(
                 "SMILES string",
-                value=default_smiles,
+                value="CC(=O)Oc1ccccc1C(=O)O",
                 placeholder="e.g. CC(=O)Oc1ccccc1C(=O)O (Aspirin)",
             ).strip()
         with col_model_sel:
@@ -270,39 +535,70 @@ def main() -> None:
         if user_smiles:
             mol = Chem.MolFromSmiles(user_smiles)
             if mol is None:
-                st.error("Invalid SMILES string. Please check your input and try again.")
+                st.error("Invalid SMILES string — please check your input.")
             else:
                 descriptors = smiles_to_descriptors(user_smiles)
                 if descriptors is None:
                     st.error("Could not compute descriptors for this molecule.")
                 else:
-                    feature_row = pd.DataFrame([descriptors])
-                    predicted_logs = active_model.pipeline.predict(feature_row)[0]
-                    interpretation = interpret_logs(predicted_logs)
-                    halfwidth = prediction_interval_halfwidth(active_model)
+                    feature_row   = pd.DataFrame([descriptors])
+                    predicted     = float(active_model.pipeline.predict(feature_row)[0])
+                    interpretation = interpret_logs(predicted)
+                    halfwidth      = prediction_interval_halfwidth(active_model)
+                    border_c, bg_c, text_c, glow_c = _logs_style(predicted)
 
                     col_mol, col_pred = st.columns([1, 1])
 
                     with col_mol:
-                        img = Draw.MolToImage(mol, size=(400, 300))
-                        st.image(img, caption=f"2D structure: `{user_smiles}`")
-
-                    with col_pred:
+                        img    = Draw.MolToImage(mol, size=(400, 280))
+                        b64    = _pil_to_b64(img)
+                        label  = user_smiles[:52] + ("…" if len(user_smiles) > 52 else "")
                         st.markdown(
                             f"""
-                            <div class="prediction-box">
-                                <strong>Predicted LogS:</strong> {predicted_logs:.3f}
-                                &plusmn; {halfwidth:.3f}
-                                <span style="opacity:0.7;">(95% interval)</span><br>
-                                <strong>Interpretation:</strong> {interpretation}
+                            <div style="text-align:center;">
+                                <img src="data:image/png;base64,{b64}"
+                                     style="width:100%;border-radius:8px;
+                                            border:1px solid {C_BORDER};
+                                            background:#f8faff;"
+                                     alt="2D structure">
+                                <div style="font-family:'JetBrains Mono',monospace;
+                                            font-size:0.7rem;color:{C_MUTED};
+                                            margin-top:0.4rem;word-break:break-all;">
+                                    {label}
+                                </div>
                             </div>
                             """,
                             unsafe_allow_html=True,
                         )
 
-                        st.markdown("**Computed Descriptors**")
+                    with col_pred:
+                        st.markdown(
+                            f"""
+                            <div class="pred-box"
+                                 style="--pred-border:{border_c};
+                                        --pred-bg:{bg_c};
+                                        --pred-color:{text_c};
+                                        --pred-glow:{glow_c};">
+                                <span class="pred-eyebrow">Predicted LogS</span>
+                                <span class="pred-value">{predicted:.3f}</span>
+                                <span class="pred-interval">&plusmn;&thinsp;{halfwidth:.3f}&nbsp;(95% CI)</span>
+                                <hr class="pred-hr">
+                                <div class="pred-interp">
+                                    <strong>Solubility class:</strong> {interpretation}
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        st.markdown(
+                            '<span class="eyebrow" style="margin-top:1.2rem;display:block;">'
+                            "Computed Descriptors</span>",
+                            unsafe_allow_html=True,
+                        )
                         desc_df = pd.DataFrame(
-                            [{"Descriptor": k, "Value": round(v, 4)} for k, v in descriptors.items()]
+                            [{"Descriptor": k, "Value": round(v, 4)}
+                             for k, v in descriptors.items()]
                         )
                         st.dataframe(desc_df, hide_index=True)
 
@@ -313,9 +609,10 @@ def main() -> None:
                         contributions = explain_prediction(active_model, feature_row)
                         if contributions is not None:
                             st.plotly_chart(shap_contribution_figure(contributions))
-                            st.caption(
-                                "Bars show how each descriptor pushed this prediction above "
-                                "or below the dataset's average LogS."
+                            st.markdown(
+                                '<span class="sub-caption">Each bar shows how a descriptor'
+                                " pushed this prediction above or below the training mean.</span>",
+                                unsafe_allow_html=True,
                             )
                         else:
                             st.info(
@@ -324,53 +621,55 @@ def main() -> None:
                             )
 
                     with col_similar:
-                        st.markdown("**Most Similar Training Compounds**")
-                        st.caption("Nearest neighbours by Morgan-fingerprint Tanimoto similarity.")
+                        st.markdown(
+                            '<span class="eyebrow">Most Similar Training Compounds</span>',
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            '<span class="sub-caption">Nearest neighbours by Morgan-fingerprint'
+                            " Tanimoto similarity.</span>",
+                            unsafe_allow_html=True,
+                        )
                         similar = find_similar_compounds(
-                            user_smiles,
-                            bundle.smiles_train,
-                            bundle.y_train,
-                            n_neighbors=5,
+                            user_smiles, bundle.smiles_train, bundle.y_train, n_neighbors=5,
                         )
                         if similar.empty:
                             st.info(
                                 "No training compounds exceed the similarity threshold — "
-                                "this molecule lies outside the model's familiar chemical space, "
-                                "so treat the prediction with extra caution."
+                                "this molecule lies outside familiar chemical space. "
+                                "Treat this prediction with extra caution."
                             )
                         else:
-                            display = similar.copy()
-                            display["Similarity"] = display["Similarity"].round(3)
-                            display["Experimental LogS"] = display["Experimental LogS"].round(3)
-                            st.dataframe(display, hide_index=True)
+                            disp = similar.copy()
+                            disp["Similarity"]        = disp["Similarity"].round(3)
+                            disp["Experimental LogS"] = disp["Experimental LogS"].round(3)
+                            st.dataframe(disp, hide_index=True)
 
-    # ── Batch Prediction ────────────────────────────────────────────────────
+    # ── Batch Prediction ──────────────────────────────────────────────────────
     with tab_batch:
         st.subheader("Batch Prediction")
         st.markdown(
-            "Upload a CSV containing SMILES strings to predict aqueous solubility for multiple "
-            "compounds at once and download the results."
+            "Upload a CSV of SMILES strings, predict solubility for every compound, "
+            "and download the results."
         )
 
-        col_upload, col_batch_opts = st.columns([2, 1])
+        col_upload, col_opts = st.columns([2, 1])
         with col_upload:
             uploaded = st.file_uploader("Upload CSV", type=["csv"])
-        with col_batch_opts:
+        with col_opts:
             batch_model_name = st.selectbox("Model", model_names, key="batch_model")
 
         if uploaded is not None:
             batch_input = pd.read_csv(uploaded)
-            st.caption(f"Loaded {len(batch_input):,} rows · {len(batch_input.columns)} columns.")
+            st.caption(f"{len(batch_input):,} rows · {len(batch_input.columns)} columns")
 
-            candidates = [c for c in batch_input.columns if "smiles" in c.lower()]
+            candidates  = [c for c in batch_input.columns if "smiles" in c.lower()]
             default_idx = batch_input.columns.tolist().index(candidates[0]) if candidates else 0
-            smiles_col = st.selectbox(
-                "SMILES column",
-                batch_input.columns.tolist(),
-                index=default_idx,
+            smiles_col  = st.selectbox(
+                "SMILES column", batch_input.columns.tolist(), index=default_idx,
             )
 
-            st.markdown("**Preview (first 5 rows)**")
+            st.markdown('<span class="eyebrow">Preview</span>', unsafe_allow_html=True)
             st.dataframe(batch_input[[smiles_col]].head(5), hide_index=True)
 
             if st.button("Run Predictions", type="primary"):
@@ -380,10 +679,9 @@ def main() -> None:
 
                 valid_n = int(result_df["Valid"].sum())
                 st.success(
-                    f"Done — {valid_n:,} / {len(result_df):,} compounds predicted successfully."
+                    f"{valid_n:,} / {len(result_df):,} compounds predicted successfully."
                 )
                 st.dataframe(result_df, hide_index=True)
-
                 st.download_button(
                     "⬇ Download predictions as CSV",
                     result_df.to_csv(index=False).encode(),
@@ -391,30 +689,26 @@ def main() -> None:
                     mime="text/csv",
                 )
 
-    # ── Performance Dashboard ───────────────────────────────────────────────
+    # ── Performance Dashboard ─────────────────────────────────────────────────
     with tab_dashboard:
         st.subheader("Model Comparison")
         st.dataframe(metrics_df, hide_index=True)
 
         st.subheader("Diagnostics")
-        dash_model_name = st.selectbox(
-            "Select model",
-            model_names,
-            index=0,
-            key="dashboard_model",
-        )
-        selected_result = get_model_by_name(bundle.results, dash_model_name)
+        dash_model = st.selectbox("Select model", model_names, index=0, key="dashboard_model")
+        selected   = get_model_by_name(bundle.results, dash_model)
 
         col_parity, col_resid = st.columns([1, 1])
         with col_parity:
-            st.plotly_chart(parity_plot(selected_result, bundle.smiles_test))
+            st.plotly_chart(parity_plot(selected, bundle.smiles_test))
         with col_resid:
-            st.plotly_chart(residuals_figure(selected_result))
+            st.plotly_chart(residuals_figure(selected))
 
-    # --- How It Works ---
+    # ── How It Works ──────────────────────────────────────────────────────────
     st.markdown(
         """
-        <div class="how-it-works">
+        <div class="hiw">
+            <span class="hiw-eyebrow">Background</span>
             <h3>How It Works</h3>
             <p>
                 <strong>Quantitative Structure-Property Relationship (QSPR)</strong> models link
