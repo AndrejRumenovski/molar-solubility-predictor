@@ -273,8 +273,33 @@ hr {{ border-color: var(--border) !important; }}
     border-top: 1px solid rgba(255,255,255,0.06);
     margin: 0.9rem 0;
 }}
-.pred-interp {{ font-size: 0.875rem; color: var(--muted); line-height: 1.55; }}
-.pred-interp strong {{ color: var(--text); font-weight: 500; }}
+.pred-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--pred-color, var(--accent));
+    background: var(--pred-badge-bg, rgba(0,229,192,0.14));
+    border: 1px solid var(--pred-color, var(--accent));
+    border-radius: 999px;
+    padding: 0.5rem 1.1rem;
+}}
+.pred-badge-dot {{
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--pred-color, var(--accent));
+    box-shadow: 0 0 10px var(--pred-color, var(--accent));
+    flex-shrink: 0;
+}}
+.pred-desc {{
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.55;
+    margin-top: 0.7rem;
+}}
 
 /* ── How It Works ──────────────────────────────────────────────────────── */
 .hiw {{
@@ -336,13 +361,13 @@ def get_training_bundle():
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _logs_style(logs: float) -> tuple[str, str, str, str]:
-    """(border, background, text_color, glow_rgba) keyed to solubility class."""
+def _logs_style(logs: float) -> tuple[str, str, str, str, str]:
+    """(border, background, text_color, glow_rgba, badge_bg) keyed to solubility class."""
     if logs > 0:
-        return C_POSITIVE, "rgba(63,185,80,0.06)",  C_POSITIVE, "rgba(63,185,80,0.10)"
+        return C_POSITIVE, "rgba(63,185,80,0.06)",  C_POSITIVE, "rgba(63,185,80,0.10)",  "rgba(63,185,80,0.16)"
     if logs > -4:
-        return C_WARNING,  "rgba(210,153,34,0.06)", C_WARNING,  "rgba(210,153,34,0.10)"
-    return     C_NEGATIVE, "rgba(248,81,73,0.06)",  C_NEGATIVE, "rgba(248,81,73,0.10)"
+        return C_WARNING,  "rgba(210,153,34,0.06)", C_WARNING,  "rgba(210,153,34,0.10)", "rgba(210,153,34,0.16)"
+    return     C_NEGATIVE, "rgba(248,81,73,0.06)",  C_NEGATIVE, "rgba(248,81,73,0.10)",  "rgba(248,81,73,0.16)"
 
 
 def _pil_to_b64(img) -> str:
@@ -545,7 +570,11 @@ def main() -> None:
                     predicted     = float(active_model.pipeline.predict(feature_row)[0])
                     interpretation = interpret_logs(predicted)
                     halfwidth      = prediction_interval_halfwidth(active_model)
-                    border_c, bg_c, text_c, glow_c = _logs_style(predicted)
+                    border_c, bg_c, text_c, glow_c, badge_c = _logs_style(predicted)
+
+                    # "Highly soluble — readily dissolves in water." → label + description
+                    sol_class, _, sol_desc = interpretation.partition("—")
+                    sol_class, sol_desc = sol_class.strip(), sol_desc.strip()
 
                     col_mol, col_pred = st.columns([1, 1])
 
@@ -578,14 +607,16 @@ def main() -> None:
                                  style="--pred-border:{border_c};
                                         --pred-bg:{bg_c};
                                         --pred-color:{text_c};
-                                        --pred-glow:{glow_c};">
+                                        --pred-glow:{glow_c};
+                                        --pred-badge-bg:{badge_c};">
                                 <span class="pred-eyebrow">Predicted LogS</span>
                                 <span class="pred-value">{predicted:.3f}</span>
                                 <span class="pred-interval">&plusmn;&thinsp;{halfwidth:.3f}&nbsp;(95% CI)</span>
                                 <hr class="pred-hr">
-                                <div class="pred-interp">
-                                    <strong>Solubility class:</strong> {interpretation}
+                                <div class="pred-badge">
+                                    <span class="pred-badge-dot"></span>{sol_class}
                                 </div>
+                                <div class="pred-desc">{sol_desc}</div>
                             </div>
                             """,
                             unsafe_allow_html=True,
