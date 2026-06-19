@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import json
 from io import BytesIO
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -429,6 +432,32 @@ def get_training_bundle():
     return train_models(df)
 
 
+BENCHMARK_PATH = Path(__file__).resolve().parent / "models" / "gnn_benchmark.json"
+
+
+@st.cache_data
+def load_benchmark() -> dict | None:
+    """Load the GNN-vs-classical benchmark artifact, if it has been generated."""
+    if BENCHMARK_PATH.exists():
+        return json.loads(BENCHMARK_PATH.read_text())
+    return None
+
+
+def benchmark_table(payload: dict) -> pd.DataFrame:
+    rows = [
+        {
+            "Model": name,
+            "Family": r["family"],
+            "R²": round(r["r2"], 4),
+            "RMSE": round(r["rmse"], 4),
+            "MAE": round(r["mae"], 4),
+            "CV R² (mean ± std)": f"{r['cv_r2_mean']:.3f} ± {r['cv_r2_std']:.3f}",
+        }
+        for name, r in payload["results"].items()
+    ]
+    return pd.DataFrame(rows).sort_values("R²", ascending=False).reset_index(drop=True)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _logs_style(logs: float) -> tuple[str, str, str, str, str]:
     """(border, background, text_color, glow_rgba, badge_bg) keyed to solubility class."""
@@ -471,6 +500,31 @@ def render_property_profile(profile) -> None:
             f'</div>'
         )
     st.markdown(f'<div class="prop-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def render_impact_metrics(items: list[dict]) -> None:
+    """Render a strip of headline metric cards (reuses the property-card grid)."""
+    cards = []
+    for it in items:
+        color = it.get("color", C_ACCENT)
+        cards.append(
+            f'<div class="prop-card" style="--prop-color:{color};">'
+            f'<span class="prop-name">{it["name"]}</span>'
+            f'<span class="prop-value">{it["value"]}</span>'
+            f'<span class="prop-detail">{it["detail"]}</span>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="prop-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def diagnostics_arrays(name, bundle, payload):
+    """Return (y_true, y_pred, smiles_or_None) for any model, classical or GNN."""
+    try:
+        mr = get_model_by_name(bundle.results, name)
+        return np.asarray(mr.y_test), np.asarray(mr.y_pred), bundle.smiles_test
+    except KeyError:
+        r = payload["results"][name]
+        return np.asarray(r["y_true"]), np.asarray(r["y_pred"]), None
 
 
 def render_model_card(model_result) -> None:
@@ -519,20 +573,19 @@ def feature_importance_figure(model_result, feature_columns: list[str]):
     return fig
 
 
-def parity_plot(model_result, smiles_test: pd.Series):
-    plot_df = pd.DataFrame({
-        "Experimental LogS": model_result.y_test,
-        "Predicted LogS":    model_result.y_pred,
-        "SMILES":            smiles_test.values,
-    })
+def parity_plot(y_true, y_pred, smiles=None, title="Parity Plot — Predicted vs. Experimental LogS"):
+    data = {"Experimental LogS": list(y_true), "Predicted LogS": list(y_pred)}
+    hover = {"Experimental LogS": ":.3f", "Predicted LogS": ":.3f"}
+    if smiles is not None:
+        data["SMILES"] = list(smiles)
+        hover["SMILES"] = True
 
+    plot_df = pd.DataFrame(data)
     fig = px.scatter(
         plot_df,
         x="Experimental LogS", y="Predicted LogS",
-        hover_data={"SMILES": True, "Experimental LogS": ":.3f", "Predicted LogS": ":.3f"},
-        title="Parity Plot — Predicted vs. Experimental LogS",
-        opacity=0.65,
-        color_discrete_sequence=[C_ACCENT],
+        hover_data=hover, title=title,
+        opacity=0.65, color_discrete_sequence=[C_ACCENT],
     )
     lo = min(plot_df["Experimental LogS"].min(), plot_df["Predicted LogS"].min()) - 0.5
     hi = max(plot_df["Experimental LogS"].max(), plot_df["Predicted LogS"].max()) + 0.5
@@ -544,13 +597,12 @@ def parity_plot(model_result, smiles_test: pd.Series):
     return fig
 
 
-def residuals_figure(model_result):
-    residuals = model_result.y_test - model_result.y_pred
+def residuals_figure(y_true, y_pred, title="Residual Distribution"):
+    residuals = np.asarray(y_true) - np.asarray(y_pred)
     fig = px.histogram(
         pd.DataFrame({"Residual (actual − predicted)": residuals}),
         x="Residual (actual − predicted)",
-        nbins=30, title="Residual Distribution",
-        color_discrete_sequence=[C_ACCENT],
+        nbins=30, title=title, color_discrete_sequence=[C_ACCENT],
     )
     fig.add_vline(x=0, line_width=1.5, line_dash="dash", line_color=C_NEGATIVE)
     fig.update_layout(**_CHART, height=420)
@@ -606,8 +658,8 @@ def run_batch_predictions(smiles_series: pd.Series, model_result) -> pd.DataFram
 def main() -> None:
     st.title("🧪 Molar Solubility Predictor")
     st.caption(
-        "QSPR pipeline · Delaney ESOL dataset · "
-        "Random Forest / Gradient Boosting / Ridge"
+        "QSPR + graph-neural-network platform · Delaney ESOL dataset · "
+        "multi-property profiling · explainable AI"
     )
 
     bundle      = get_training_bundle()
@@ -837,18 +889,81 @@ def main() -> None:
 
     # ── Performance Dashboard ─────────────────────────────────────────────────
     with tab_dashboard:
-        st.subheader("Model Comparison")
-        st.dataframe(metrics_df, hide_index=True)
+        benchmark = load_benchmark()
 
-        st.subheader("Diagnostics")
-        dash_model = st.selectbox("Select model", model_names, index=0, key="dashboard_model")
-        selected   = get_model_by_name(bundle.results, dash_model)
+        # ── Research impact metrics ────────────────────────────────────────────
+        st.markdown(
+            '<span class="eyebrow" style="color:var(--accent);">Research Impact</span>',
+            unsafe_allow_html=True,
+        )
+        if benchmark:
+            best_name = max(benchmark["results"], key=lambda k: benchmark["results"][k]["r2"])
+            best = benchmark["results"][best_name]
+            n_models = len(benchmark["results"])
+            render_impact_metrics([
+                {"name": "Compounds Analyzed", "value": f"{benchmark['n_compounds']:,}",
+                 "detail": "Delaney ESOL benchmark dataset"},
+                {"name": "Models Benchmarked", "value": str(n_models),
+                 "detail": "Classical ML + graph neural networks"},
+                {"name": "Best Model", "value": best_name,
+                 "detail": f"{best['family']}", "color": C_POSITIVE},
+                {"name": "Best Test R²", "value": f"{best['r2']:.3f}",
+                 "detail": f"RMSE {best['rmse']:.3f} log units", "color": C_POSITIVE},
+                {"name": "Prediction Error", "value": f"±{best['mae']:.3f}",
+                 "detail": "Mean absolute error (best model)"},
+            ])
+        else:
+            best_classical = max(bundle.results, key=lambda r: r.r2)
+            render_impact_metrics([
+                {"name": "Compounds Analyzed", "value": "1,128",
+                 "detail": "Delaney ESOL benchmark dataset"},
+                {"name": "Models Trained", "value": str(len(bundle.results)),
+                 "detail": "Random Forest · Gradient Boosting · Ridge"},
+                {"name": "Best Model", "value": best_classical.name,
+                 "detail": "Highest held-out R²", "color": C_POSITIVE},
+                {"name": "Best Test R²", "value": f"{best_classical.r2:.3f}",
+                 "detail": f"MAE {best_classical.mae:.3f} log units", "color": C_POSITIVE},
+            ])
+
+        # ── Benchmark table ────────────────────────────────────────────────────
+        st.markdown(
+            '<span class="eyebrow" style="margin-top:1.75rem;display:block;">Model Benchmark</span>',
+            unsafe_allow_html=True,
+        )
+        if benchmark:
+            st.markdown(
+                '<span class="sub-caption">Classical models and graph neural networks on an '
+                f"identical {int((1-benchmark['test_size'])*100)}/{int(benchmark['test_size']*100)} "
+                f"split, with {benchmark['cv_folds']}-fold cross-validation.</span>",
+                unsafe_allow_html=True,
+            )
+            st.dataframe(benchmark_table(benchmark), hide_index=True)
+            all_models = list(benchmark["results"].keys())
+        else:
+            st.markdown(
+                '<span class="sub-caption">Showing classical models only. Run '
+                "<code>python -m src.graph_training</code> to add the GCN / GAT / MPNN "
+                "graph-neural-network benchmark.</span>",
+                unsafe_allow_html=True,
+            )
+            st.dataframe(metrics_df, hide_index=True)
+            all_models = model_names
+
+        # ── Diagnostics ────────────────────────────────────────────────────────
+        st.markdown(
+            '<span class="eyebrow" style="margin-top:1.75rem;display:block;">Diagnostics</span>',
+            unsafe_allow_html=True,
+        )
+        dash_model = st.selectbox("Select model", all_models, index=0, key="dashboard_model")
+        y_true, y_pred, smiles = diagnostics_arrays(dash_model, bundle, benchmark)
 
         col_parity, col_resid = st.columns([1, 1])
         with col_parity:
-            st.plotly_chart(parity_plot(selected, bundle.smiles_test))
+            st.plotly_chart(parity_plot(y_true, y_pred, smiles=smiles,
+                                        title=f"Parity Plot — {dash_model}"))
         with col_resid:
-            st.plotly_chart(residuals_figure(selected))
+            st.plotly_chart(residuals_figure(y_true, y_pred,
+                                             title=f"Residuals — {dash_model}"))
 
     # ── How It Works ──────────────────────────────────────────────────────────
     st.markdown(
@@ -870,9 +985,16 @@ def main() -> None:
                 rigidity, and hydrogen-bonding capacity — the key drivers of aqueous solubility.
             </p>
             <p>
-                Three regression models (Random Forest, Gradient Boosting, Ridge) are trained on
-                80% of the data and evaluated on a held-out 20% test set. Enter any valid SMILES
-                above to get an instant solubility prediction.
+                Classical regression models (Random Forest, Gradient Boosting, Ridge) are
+                benchmarked against <strong>graph neural networks</strong> (GCN, GAT, MPNN) that
+                learn directly from the molecular graph — atoms as nodes, bonds as edges — on an
+                identical train/test split with cross-validation.
+            </p>
+            <p>
+                Every prediction is accompanied by a <strong>multi-property profile</strong>
+                (drug-likeness, toxicity risk, blood-brain-barrier penetration) and
+                <strong>explainable-AI</strong> attributions showing which descriptors drove the
+                result. Enter any valid SMILES above to begin.
             </p>
         </div>
         """,

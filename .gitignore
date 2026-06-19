@@ -27,3 +27,7 @@ Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Trained GNN weights (regenerate with `python -m src.graph_training`);
+# the benchmark JSON is committed so the dashboard works out of the box.
+models/*.pt
