@@ -10,6 +10,7 @@ End-to-end **computational chemistry platform** that predicts aqueous solubility
 - **Multi-property profiling** — solubility, lipophilicity, molecular weight, TPSA, drug-likeness (QED), Lipinski Rule of Five, structural-alert toxicity risk (Brenk/PAINS), and blood-brain-barrier penetration (Clark's logBB).
 - **Explainable AI** — per-prediction SHAP feature contributions with a plain-language explanation, 95% prediction intervals, and nearest training compounds by Tanimoto similarity.
 - **Research dashboard** — unified benchmark table (R², RMSE, MAE, CV R²), parity and residual plots for every model, feature importance, and headline impact metrics.
+- **Auto research report** — one-click export of a formatted PDF paper (Abstract → Conclusion + References) with figures and statistics populated from the benchmark.
 
 ## Quick Start
 
@@ -47,7 +48,8 @@ molar-solubility-predictor/
     ├── properties.py       # Multi-property profiling (QED, tox, BBB, …)
     ├── graph_data.py       # SMILES → PyTorch Geometric graphs
     ├── graph_models.py     # GCN / GAT / MPNN architectures
-    └── graph_training.py   # GNN training, CV, and benchmark export
+    ├── graph_training.py   # GNN training, CV, and benchmark export
+    └── report.py           # Auto-generated research-paper PDF
 ```
 
 ## Standalone Scripts

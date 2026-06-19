@@ -25,6 +25,7 @@ from src.interpretability import (
 )
 from src.models import get_model_by_name, metrics_dataframe, train_models
 from src.properties import molecular_property_profile
+from src.report import generate_report_pdf
 
 RANDOM_FOREST = "Random Forest"
 
@@ -443,6 +444,12 @@ def load_benchmark() -> dict | None:
     return None
 
 
+@st.cache_data(show_spinner="Composing research report…")
+def cached_report(_payload: dict, cache_key) -> bytes:
+    """Generate the PDF once per benchmark version (cache_key invalidates it)."""
+    return generate_report_pdf(_payload)
+
+
 def benchmark_table(payload: dict) -> pd.DataFrame:
     rows = [
         {
@@ -683,8 +690,8 @@ def main() -> None:
             st.plotly_chart(fi_fig)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
-    tab_predict, tab_batch, tab_dashboard = st.tabs(
-        ["Live Inference", "Batch Prediction", "Performance Dashboard"]
+    tab_predict, tab_batch, tab_dashboard, tab_report = st.tabs(
+        ["Live Inference", "Batch Prediction", "Performance Dashboard", "Research Report"]
     )
 
     # ── Live Inference ────────────────────────────────────────────────────────
@@ -964,6 +971,60 @@ def main() -> None:
         with col_resid:
             st.plotly_chart(residuals_figure(y_true, y_pred,
                                              title=f"Residuals — {dash_model}"))
+
+    # ── Research Report ────────────────────────────────────────────────────────
+    with tab_report:
+        st.subheader("Auto-Generated Research Report")
+        st.markdown(
+            "Compile the benchmark into a formatted research paper — Abstract, "
+            "Introduction, Methodology, Results, Discussion, Conclusion, and References — "
+            "with every figure and statistic populated from the trained models."
+        )
+
+        report_payload = load_benchmark()
+        if report_payload is None:
+            st.info(
+                "No benchmark found. Run `python -m src.graph_training` first to train "
+                "the models; the report is generated from the resulting metrics."
+            )
+        else:
+            best_name = max(report_payload["results"],
+                            key=lambda k: report_payload["results"][k]["r2"])
+            best = report_payload["results"][best_name]
+            sections = ["Abstract", "Introduction", "Methodology", "Results",
+                        "Discussion", "Conclusion", "References"]
+            chips = "".join(
+                f'<span style="display:inline-block;background:var(--surface2);'
+                f'border:1px solid var(--border);border-radius:999px;padding:0.2rem 0.7rem;'
+                f'margin:0.2rem 0.3rem 0.2rem 0;font-size:0.72rem;color:var(--muted);">'
+                f'{s}</span>'
+                for s in sections
+            )
+            st.markdown(
+                f'<div class="hiw" style="margin-top:1rem;">'
+                f'<span class="hiw-eyebrow">Preview</span>'
+                f'<h3>Benchmarking Classical Machine Learning against Graph Neural '
+                f'Networks for Aqueous Solubility Prediction</h3>'
+                f'<p>A unified study of six models on {report_payload["n_compounds"]:,} '
+                f'Delaney ESOL compounds. The best model, <strong>{best_name}</strong>, '
+                f'reaches a held-out R² of <strong>{best["r2"]:.3f}</strong> '
+                f'(RMSE {best["rmse"]:.3f}, MAE {best["mae"]:.3f} log units), evaluated '
+                f'against {report_payload["cv_folds"]}-fold cross-validation.</p>'
+                f'<div style="margin-top:0.75rem;">{chips}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            pdf_bytes = cached_report(report_payload, BENCHMARK_PATH.stat().st_mtime)
+            st.download_button(
+                "⬇ Download research report (PDF)",
+                data=pdf_bytes,
+                file_name="solubility_benchmark_report.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
+            st.caption(f"{len(pdf_bytes) / 1024:.0f} KB · 2 figures · generated from "
+                       f"models/gnn_benchmark.json")
 
     # ── How It Works ──────────────────────────────────────────────────────────
     st.markdown(
