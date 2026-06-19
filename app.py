@@ -17,9 +17,11 @@ from src.featurizer import FEATURE_COLUMNS, featurize_dataframe, interpret_logs,
 from src.interpretability import (
     explain_prediction,
     find_similar_compounds,
+    natural_language_explanation,
     prediction_interval_halfwidth,
 )
 from src.models import get_model_by_name, metrics_dataframe, train_models
+from src.properties import molecular_property_profile
 
 RANDOM_FOREST = "Random Forest"
 
@@ -301,6 +303,73 @@ hr {{ border-color: var(--border) !important; }}
     margin-top: 0.7rem;
 }}
 
+/* ── Property profile cards (glassmorphism grid) ───────────────────────── */
+.prop-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.7rem;
+    margin-top: 0.4rem;
+}}
+.prop-card {{
+    background: rgba(28,35,51,0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--prop-color, var(--accent));
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}}
+.prop-card:hover {{
+    transform: translateY(-2px);
+    border-color: var(--prop-color, var(--accent));
+}}
+.prop-name {{
+    font-size: 0.58rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 0.45rem;
+}}
+.prop-value {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--prop-color, var(--text));
+    display: block;
+}}
+.prop-cat {{
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--prop-color, var(--muted));
+    display: block;
+    margin-top: 0.4rem;
+}}
+.prop-detail {{
+    font-size: 0.6rem;
+    color: var(--muted);
+    display: block;
+    margin-top: 0.3rem;
+    line-height: 1.4;
+}}
+
+/* ── XAI natural-language callout ───────────────────────────────────────── */
+.xai-note {{
+    background: var(--dim);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.85rem 1.1rem;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--text);
+}}
+.xai-note strong {{ color: var(--accent); font-weight: 600; }}
+
 /* ── How It Works ──────────────────────────────────────────────────────── */
 .hiw {{
     background: var(--surface);
@@ -374,6 +443,34 @@ def _pil_to_b64(img) -> str:
     buf = BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
+
+
+_SENTIMENT_COLOR = {
+    "good": C_POSITIVE,
+    "neutral": C_ACCENT,
+    "warn": C_WARNING,
+    "bad": C_NEGATIVE,
+}
+
+
+def render_property_profile(profile) -> None:
+    """Render the multi-property profile as a grid of glassmorphism cards."""
+    cards = []
+    for prop in profile.properties:
+        color = _SENTIMENT_COLOR.get(prop.sentiment, C_ACCENT)
+        unit = (
+            f"<span style='font-size:0.7rem;color:{C_MUTED};'> {prop.unit}</span>"
+            if prop.unit else ""
+        )
+        cards.append(
+            f'<div class="prop-card" style="--prop-color:{color};">'
+            f'<span class="prop-name">{prop.name}</span>'
+            f'<span class="prop-value">{prop.display}{unit}</span>'
+            f'<span class="prop-cat">{prop.category}</span>'
+            f'<span class="prop-detail">{prop.detail}</span>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="prop-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
 def render_model_card(model_result) -> None:
@@ -633,6 +730,22 @@ def main() -> None:
                         )
                         st.dataframe(desc_df, hide_index=True)
 
+                    # ── Multi-property profile ──────────────────────────────
+                    profile = molecular_property_profile(user_smiles, logs=predicted)
+                    if profile is not None:
+                        st.markdown(
+                            '<span class="eyebrow" style="margin-top:1.5rem;display:block;">'
+                            "Molecular Property Profile</span>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            '<span class="sub-caption">Predicted and structure-derived properties '
+                            "spanning solubility, drug-likeness, toxicity risk, and CNS penetration."
+                            "</span>",
+                            unsafe_allow_html=True,
+                        )
+                        render_property_profile(profile)
+
                     st.divider()
                     col_shap, col_similar = st.columns([1, 1])
 
@@ -640,11 +753,13 @@ def main() -> None:
                         contributions = explain_prediction(active_model, feature_row)
                         if contributions is not None:
                             st.plotly_chart(shap_contribution_figure(contributions))
-                            st.markdown(
-                                '<span class="sub-caption">Each bar shows how a descriptor'
-                                " pushed this prediction above or below the training mean.</span>",
-                                unsafe_allow_html=True,
-                            )
+                            explanation = natural_language_explanation(contributions)
+                            if explanation:
+                                st.markdown(
+                                    f'<div class="xai-note"><strong>In plain terms:</strong> '
+                                    f"{explanation}</div>",
+                                    unsafe_allow_html=True,
+                                )
                         else:
                             st.info(
                                 "SHAP explanations are available for Random Forest and "

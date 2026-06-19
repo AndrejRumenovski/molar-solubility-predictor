@@ -127,3 +127,39 @@ def explain_prediction(
         result.reindex(result["Contribution"].abs().sort_values(ascending=False).index)
         .reset_index(drop=True)
     )
+
+
+_FEATURE_PHRASES = {
+    "MolLogP": "lipophilicity (LogP)",
+    "MolWt": "molecular weight",
+    "NumRotatableBonds": "rotatable-bond count",
+    "AromaticProportion": "aromatic proportion",
+    "TPSA": "polar surface area (TPSA)",
+}
+
+
+def natural_language_explanation(contributions: pd.DataFrame | None, top_n: int = 3) -> str:
+    """
+    Turn SHAP contributions into a plain-language sentence about the prediction.
+
+    Example: "Lipophilicity (LogP) lowers predicted solubility the most, while
+    polar surface area (TPSA) raises it; molecular weight lowers it slightly."
+    """
+    if contributions is None or contributions.empty:
+        return ""
+
+    ranked = contributions.reindex(
+        contributions["Contribution"].abs().sort_values(ascending=False).index
+    ).head(top_n)
+
+    clauses = []
+    for _, row in ranked.iterrows():
+        phrase = _FEATURE_PHRASES.get(row["Feature"], row["Feature"])
+        verb = "raises" if row["Contribution"] >= 0 else "lowers"
+        clauses.append(f"{phrase} {verb} predicted solubility")
+
+    if len(clauses) == 1:
+        body = clauses[0]
+    else:
+        body = ", ".join(clauses[:-1]) + f", and {clauses[-1]}"
+    return body[0].upper() + body[1:] + "."
