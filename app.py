@@ -49,7 +49,7 @@ C_MUTED = "#8a97ad"
 SENTIMENT_COLOR = {"good": C_SUCCESS, "neutral": C_ACCENT, "warn": C_WARNING, "bad": C_DANGER}
 
 NAV = [
-    "Dashboard", "Live Prediction", "Batch Screening", "Model Benchmarks",
+    "Live Prediction", "Dashboard", "Batch Screening", "Model Benchmarks",
     "Molecular Search", "Research Reports", "Settings",
 ]
 NAV_ICON = {
