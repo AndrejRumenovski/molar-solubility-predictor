@@ -93,8 +93,12 @@ h1,h2,h3,h4 { font-family:'Inter',sans-serif !important; letter-spacing:-0.02em 
 .stApp { color:var(--text); }
 
 /* Chrome */
-#MainMenu, footer, [data-testid="stToolbar"] { visibility:hidden !important; }
-[data-testid="stHeader"] { background:transparent !important; height:0 !important; }
+/* Hide only the Deploy/menu/status — NOT the whole toolbar, which also holds
+   the sidebar-expand control needed to bring the sidebar back when collapsed. */
+#MainMenu, footer { visibility:hidden !important; }
+[data-testid="stToolbarActions"], [data-testid="stStatusWidget"] { display:none !important; }
+[data-testid="stExpandSidebarButton"] button:hover { color:var(--accent) !important; }
+[data-testid="stHeader"] { background:transparent !important; }
 [data-testid="stDecoration"] { display:none !important; }
 [data-testid="stMainBlockContainer"] { padding:1.1rem 1.8rem 3rem !important; max-width:100% !important; }
 [data-testid="stVerticalBlock"] { gap:0.7rem !important; }
