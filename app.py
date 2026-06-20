@@ -874,7 +874,8 @@ def main():
             '<span style="font-weight:700;font-size:0.95rem;color:#E6EDF6;letter-spacing:-0.02em;">SolubilityLab</span>'
             '</div>', unsafe_allow_html=True)
         st.markdown('<span class="eyebrow" style="padding:0 0.3rem;">Navigation</span>', unsafe_allow_html=True)
-        choice = st.radio("nav", NAV, label_visibility="collapsed",
+        choice = st.radio("nav", NAV, index=NAV.index("Live Prediction"),
+                          label_visibility="collapsed",
                           format_func=lambda x: f"{NAV_ICON[x]}   {x}")
         st.divider()
         st.markdown('<span class="eyebrow accent" style="padding:0 0.3rem;">Model Performance</span>',
