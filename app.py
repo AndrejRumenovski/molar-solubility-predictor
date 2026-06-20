@@ -106,6 +106,11 @@ h1,h2,h3,h4 { font-family:'Inter',sans-serif !important; letter-spacing:-0.02em 
 [data-testid="stHeader"] { background:transparent !important; }
 [data-testid="stDecoration"] { display:none !important; }
 [data-testid="stMainBlockContainer"] { padding:1.1rem 1.8rem 3rem !important; max-width:100% !important; }
+/* When the sidebar is collapsed, Streamlit floats the expand button top-left;
+   indent the content so it doesn't overlap the header title. */
+.stApp:has([data-testid="stSidebar"][aria-expanded="false"]) [data-testid="stMainBlockContainer"] {
+    padding-left:3.6rem !important;
+}
 [data-testid="stVerticalBlock"] { gap:0.7rem !important; }
 
 /* Sidebar */
