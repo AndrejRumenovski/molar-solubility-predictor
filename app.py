@@ -34,17 +34,17 @@ from src.models import get_model_by_name, metrics_dataframe, train_models
 from src.properties import molecular_property_profile
 from src.report import generate_report_pdf
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-C_BG = "#050816"
-C_PANEL = "#0B1220"
-C_PANEL2 = "#111827"
-C_BORDER = "#1c2740"
-C_ACCENT = "#00D4FF"
-C_SUCCESS = "#00E676"
-C_WARNING = "#FFB020"
-C_DANGER = "#FF5C7A"
-C_TEXT = "#E6EDF6"
-C_MUTED = "#8A97AD"
+# ── Palette (muted, scientific — desaturated to avoid a neon look) ───────────────
+C_BG = "#0b0f17"
+C_PANEL = "#10151f"
+C_PANEL2 = "#161d2a"
+C_BORDER = "#222b3a"
+C_ACCENT = "#56a3c4"
+C_SUCCESS = "#46b17e"
+C_WARNING = "#d9a441"
+C_DANGER = "#e0697d"
+C_TEXT = "#e6edf6"
+C_MUTED = "#8a97ad"
 
 SENTIMENT_COLOR = {"good": C_SUCCESS, "neutral": C_ACCENT, "warn": C_WARNING, "bad": C_DANGER}
 
@@ -76,11 +76,11 @@ CUSTOM_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-    --bg:#050816; --panel:#0B1220; --panel2:#111827; --panel3:#162033;
-    --border:#1c2740; --border2:#26334d;
-    --accent:#00D4FF; --accent-dim:rgba(0,212,255,0.10); --accent-bd:rgba(0,212,255,0.45);
-    --success:#00E676; --warning:#FFB020; --danger:#FF5C7A;
-    --text:#E6EDF6; --muted:#8A97AD; --faint:#5b6678;
+    --bg:#0b0f17; --panel:#10151f; --panel2:#161d2a; --panel3:#1b2330;
+    --border:#222b3a; --border2:#2c374a;
+    --accent:#56a3c4; --accent-dim:rgba(86,163,196,0.12); --accent-bd:rgba(86,163,196,0.42);
+    --success:#46b17e; --warning:#d9a441; --danger:#e0697d;
+    --text:#e6edf6; --muted:#8a97ad; --faint:#5b6678;
 }
 @keyframes fadeUp { from {opacity:0; transform:translateY(8px);} to {opacity:1; transform:none;} }
 @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
@@ -133,7 +133,7 @@ section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked)
 
 /* Glass panels (st.container(border=True)) */
 [data-testid="stVerticalBlockBorderWrapper"] {
-    background:linear-gradient(180deg, rgba(20,28,44,0.65), rgba(11,18,32,0.65)) !important;
+    background:linear-gradient(180deg, rgba(22,29,42,0.55), rgba(16,21,31,0.55)) !important;
     border:1px solid var(--border) !important; border-radius:12px !important;
     padding:1rem 1.15rem !important; box-shadow:0 1px 2px rgba(0,0,0,0.35);
 }
@@ -212,7 +212,7 @@ button[aria-selected="true"][data-baseweb="tab"] { color:var(--accent) !importan
 .lead .row2 { display:flex; gap:1rem; margin-top:0.35rem; }
 .lead .met { display:flex; flex-direction:column; }
 .lead .met .ml { font-size:0.5rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--faint); }
-.lead .met .mv { font-family:'JetBrains Mono',monospace !important; font-size:0.8rem; font-weight:500; color:var(--accent); line-height:1.1; }
+.lead .met .mv { font-family:'JetBrains Mono',monospace !important; font-size:0.8rem; font-weight:500; color:var(--text); line-height:1.1; }
 
 /* XAI note */
 .xai { background:var(--accent-dim); border:1px solid var(--border); border-left:3px solid var(--accent);
@@ -488,14 +488,14 @@ def render_mol_3d(smiles: str, height: int = 300) -> bool:
     html = (
         '<script src="https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js"></script>'
         f'<div id="vw" style="height:{height}px;width:100%;position:relative;border-radius:10px;'
-        'overflow:hidden;background:#0B1220;border:1px solid #1c2740;"></div>'
+        'overflow:hidden;background:#10151f;border:1px solid #222b3a;"></div>'
         '<script>'
         'function draw(){'
         'if(typeof $3Dmol==="undefined"){setTimeout(draw,120);return;}'
         'let el=document.getElementById("vw");'
-        'let v=$3Dmol.createViewer(el,{backgroundColor:0x0B1220});'
+        'let v=$3Dmol.createViewer(el,{backgroundColor:0x10151f});'
         f'v.addModel(`{molblock}`,"mol");'
-        'v.setStyle({},{stick:{radius:0.13,colorscheme:"cyanCarbon"},sphere:{scale:0.22}});'
+        'v.setStyle({},{stick:{radius:0.13},sphere:{scale:0.22}});'
         'v.zoomTo();v.render();}draw();'
         '</script>'
     )
