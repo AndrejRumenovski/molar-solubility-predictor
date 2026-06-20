@@ -153,7 +153,7 @@ def _build_story(payload: dict, ss) -> list:
 
     story.append(P("Benchmarking Classical Machine Learning against Graph Neural "
                    "Networks for Aqueous Solubility Prediction", "PaperTitle"))
-    story.append(P("AI-Assisted Molecular Property Discovery Platform", "Authors"))
+    story.append(P("Molecular Property Discovery Platform", "Authors"))
     story.append(P(f"Automatically generated report · {today}", "Authors"))
     story.append(Spacer(1, 10))
 
@@ -291,7 +291,7 @@ def generate_report_pdf(payload: dict) -> bytes:
         leftMargin=0.85 * inch, rightMargin=0.85 * inch,
         topMargin=0.8 * inch, bottomMargin=0.8 * inch,
         title="Solubility Prediction Benchmark Report",
-        author="AI-Assisted Molecular Property Discovery Platform",
+        author="Molecular Property Discovery Platform",
     )
     doc.build(_build_story(payload, _styles()))
     buf.seek(0)
