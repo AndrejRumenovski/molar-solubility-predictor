@@ -60,7 +60,6 @@ NAV_ICON = {
 
 st.set_page_config(
     page_title="Molar Solubility Predictor",
-    page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -839,7 +838,7 @@ def render_header(bundle, benchmark, rows, df_len):
         with c_brand:
             st.markdown(
                 '<div class="appbar">'
-                '<span class="brand">🧪 Molar Solubility Predictor</span>'
+                '<span class="brand">Molar Solubility Predictor</span>'
                 '<span class="badge live">● Delaney ESOL</span>'
                 f'<span class="stat"><span class="k">Compounds</span><span class="v">{df_len:,}</span></span>'
                 f'<span class="stat"><span class="k">Active model</span><span class="v accent">{active}</span></span>'
@@ -870,7 +869,6 @@ def main():
     with st.sidebar:
         st.markdown(
             '<div style="display:flex;align-items:center;gap:0.5rem;padding:0 0.3rem 0.4rem;">'
-            '<span style="font-size:1.15rem;">🧪</span>'
             '<span style="font-weight:700;font-size:0.95rem;color:#E6EDF6;letter-spacing:-0.02em;">SolubilityLab</span>'
             '</div>', unsafe_allow_html=True)
         st.markdown('<span class="eyebrow" style="padding:0 0.3rem;">Navigation</span>', unsafe_allow_html=True)
