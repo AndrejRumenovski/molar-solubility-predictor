@@ -89,6 +89,11 @@ html, body, .stApp { background:var(--bg) !important; }
 html, body, .stApp, p, label, div, span, li, td, th, input, button, select {
     font-family:'Inter', sans-serif !important;
 }
+/* Don't let the Inter override clobber Streamlit's Material icon font (or its
+   ligature names render as literal text, e.g. "keyboard_double_arrow_left"). */
+[data-testid="stIconMaterial"] {
+    font-family:'Material Symbols Rounded','Material Symbols Outlined','Material Icons' !important;
+}
 h1,h2,h3,h4 { font-family:'Inter',sans-serif !important; letter-spacing:-0.02em !important; color:var(--text) !important; }
 .stApp { color:var(--text); }
 
